@@ -1,326 +1,322 @@
 function waveGUI()
-% waveGUI
-% Creates a GUI that allows the user to:
-%   - Select wave type (regular / irregular + specific model)
-%   - Enter simulation parameters
-%   - Save/Load config to .MAT files
-%   - Plot wave time series in the GUI (preview)
-%   - Generate ASCII output file for SIMA
-%   - Save wave data (time, eta) + config to a .MAT file
+% waveGUI - Wave Generator GUI
 %
-% CHANGES from previous version:
-%   1) Adds a callback to the spectrum model popup so the UI updates immediately.
-%   2) Restores MATLAB's default figure toolbar for zoom/pan/home.
-%   3) Adds a "Save Wave Data" button.
+% Description:
+%   A MATLAB GUI to generate regular and irregular wave elevation signals,
+%   plot the wave, save wave data, and generate SIMA-compatible ASCII files.
+%   The tool features a ramp function to gradually introduce wave amplitudes,
+%   ensuring a smooth start to the simulated waves.
+%
+% Features:
+%   - Displays all parameters at once.
+%   - Disables irrelevant fields based on the selected wave/spectrum model.
+%   - Improved alignment and intuitive UI layout.
+%   - Default window size of 1024 x 666 pixels (adjust as preferred).
+%   - Load/Save configuration options at the top.
+%   - Supports generating Regular waves and various Irregular waves, including:
+%       * JONSWAP (2-param, 3-param, 6-param)
+%       * Torsethaugen (testing)
+%       * Ochi-Hubble (testing)
+%       * PM variants (1-param, 2-param with Tavg or Tzc)
+%
+% Changes in this version (v1.1):
+%   - Adds a "please wait" popup during wave generation, and a success popup
+%     that auto‐closes after 5 seconds.
+%   - Fixes JONSWAP 2-param, JONSWAP 3-param, Torsethaugen (testing), and Ochi-Hubble (testing)
+%     so they skip w = 0 in the spectrum calculation (avoiding division by zero).
+%
+% **Author:** Shuijin Li
+% **Email:** lishuijin@nbu.edu.cn
+% **Date:** 2025.03.06
 
-%% === Create the figure & main layout ===
+%% --------------------------------------------------------------------
+%                     Figure & Panel Setup
+%% --------------------------------------------------------------------
 figWidth  = 1024;
-figHeight = 768;
+figHeight = 666;
 fig = figure('Name','Wave Generator GUI',...
     'NumberTitle','off',...
     'MenuBar','none',...
-    'ToolBar','figure',...          % <-- ADDED: restore default toolbar (zoom, pan, etc.)
+    'ToolBar','figure',... % Includes Zoom/Pan/Home
     'Resize','off',...
     'Position',[100 100 figWidth figHeight]);
 
-% Panel for user controls
-ctrlPanelWidth = 300;
+panelWidth  = 380;
+panelHeight = figHeight - 20;
 ctrlPanel = uipanel('Parent',fig,...
     'Units','pixels',...
     'Title','User Inputs',...
     'FontWeight','bold',...
-    'Position',[10 10 ctrlPanelWidth figHeight-20]);
+    'Position',[10 10 panelWidth panelHeight]);
 
-% Axes for the preview plot (right side)
+% Axes for plotting on the right side
 ax = axes('Parent',fig,...
     'Units','pixels',...
-    'Position',[ctrlPanelWidth+40, 60, figWidth - ctrlPanelWidth - 70, figHeight - 120]);
+    'Position',[panelWidth+60, 80, figWidth - (panelWidth+80), figHeight - 120]);
 title(ax, 'Wave Elevation Preview');
 xlabel(ax, 'Time [s]');
 ylabel(ax, '\eta(t) [m]');
 grid(ax,'on');
 
-%% === Common UI elements (shared by both wave types) ===
-% waveType selection
+%% --------------------------------------------------------------------
+%                  Common Layout Parameters
+%% --------------------------------------------------------------------
+yTop = panelHeight - 40;
+rowHeight = 20;
+labelWidth = 200;
+editWidth  = 60;
+xLabel = 10;
+xEdit  = xLabel + labelWidth + 10;
+
+%% --------------------------------------------------------------------
+%              1) Load/Save Config Buttons (Top of Panel)
+%% --------------------------------------------------------------------
+btnLoadCfg = uicontrol('Parent',ctrlPanel,'Style','pushbutton',...
+    'String','Load Config','Position',[xLabel yTop 90 rowHeight],...
+    'Callback',@onLoadConfig);
+
+btnSaveCfg = uicontrol('Parent',ctrlPanel,'Style','pushbutton',...
+    'String','Save Config','Position',[xLabel+100 yTop 90 rowHeight],...
+    'Callback',@onSaveConfig);
+
+yTop = yTop - rowHeight - 10;
+
+%% --------------------------------------------------------------------
+%              2) Wave Type & Spectrum Model
+%% --------------------------------------------------------------------
 uicontrol('Parent',ctrlPanel,'Style','text','String','Wave Type:',...
-    'HorizontalAlignment','left','Position',[10 figHeight-60-10 80 20]);
+    'HorizontalAlignment','left',...
+    'Position',[xLabel yTop labelWidth rowHeight]);
 waveTypePopup = uicontrol('Parent',ctrlPanel,'Style','popupmenu',...
     'String',{'Regular','Irregular'},...
     'Value',1,...
-    'Position',[100 figHeight-60-10 150 25],...
+    'Position',[xEdit yTop editWidth+40 rowHeight],...
     'Callback',@onWaveTypeChanged);
 
-% Spectrum model selection (for irregular waves)
+yTop = yTop - rowHeight - 5;
+
+% modelList = {'JONSWAP 2-param','JONSWAP 3-param','JONSWAP 6-param',...
+%     'Torsethaugen','Ochi-Hubble','PM (1-param)',...
+%     'PM (2-param, Tavg)','PM (2-param, Tzc)'};
 modelList = {'JONSWAP 2-param','JONSWAP 3-param','JONSWAP 6-param',...
-    'Torsethaugen','Ochi-Hubble','PM (1-param)',...
-    'PM (2-param, Tavg)','PM (2-param, Tzc)'};
+    'PM (1-param)','PM (2-param, Tavg)','PM (2-param, Tzc)'};
 uicontrol('Parent',ctrlPanel,'Style','text','String','Spectrum Model:',...
-    'HorizontalAlignment','left','Position',[10 figHeight-90-10 100 20]);
+    'HorizontalAlignment','left',...
+    'Position',[xLabel yTop labelWidth rowHeight]);
 spectrumPopup = uicontrol('Parent',ctrlPanel,'Style','popupmenu',...
     'String',modelList,...
     'Value',1,...
-    'Position',[120 figHeight-90-10 130 25],...
-    'Callback',@onSpectrumModelChanged);  % <-- ADDED callback
+    'Position',[xEdit yTop editWidth+70 rowHeight],...
+    'Callback',@onSpectrumModelChanged);
 
-% Common parameters
-commonYStart = figHeight - 130;
-uicontrol('Parent',ctrlPanel,'Style','text','String','Time Step:',...
-    'HorizontalAlignment','left','Position',[10 commonYStart 100 20]);
-edtTimeStep = uicontrol('Parent',ctrlPanel,'Style','edit','String','0.5',...
-    'Position',[120 commonYStart 50 25]);
+yTop = yTop - rowHeight - 15;
 
-uicontrol('Parent',ctrlPanel,'Style','text','String','Num Samples:',...
-    'HorizontalAlignment','left','Position',[10 commonYStart-30 100 20]);
-edtNumSamples = uicontrol('Parent',ctrlPanel,'Style','edit','String','2048',...
-    'Position',[120 commonYStart-30 50 25]);
+%% --------------------------------------------------------------------
+%         3) Common Simulation Parameters
+%% --------------------------------------------------------------------
+labels = {'Time Step (s):', 'Number of Samples:', 'Ramp Duration (sec):', 'Random Seed (for irregular waves):'};
+defaultVals = {'0.1','40000','0','1'};
+handlesCommon = [];
 
-uicontrol('Parent',ctrlPanel,'Style','text','String','Ramp Duration:',...
-    'HorizontalAlignment','left','Position',[10 commonYStart-60 100 20]);
-edtRamp = uicontrol('Parent',ctrlPanel,'Style','edit','String','20',...
-    'Position',[120 commonYStart-60 50 25]);
+for ii = 1:numel(labels)
+    uicontrol('Parent',ctrlPanel,'Style','text','String',labels{ii},...
+        'HorizontalAlignment','left',...
+        'Position',[xLabel yTop labelWidth rowHeight]);
+    handlesCommon(ii) = uicontrol('Parent',ctrlPanel,'Style','edit',...
+        'String',defaultVals{ii},...
+        'Position',[xEdit yTop editWidth rowHeight]);
+    yTop = yTop - rowHeight - 5;
+end
 
-uicontrol('Parent',ctrlPanel,'Style','text','String','Random Seed:',...
-    'HorizontalAlignment','left','Position',[10 commonYStart-90 100 20]);
-edtRandomSeed = uicontrol('Parent',ctrlPanel,'Style','edit','String','42',...
-    'Position',[120 commonYStart-90 50 25]);
+edtTimeStep   = handlesCommon(1);
+edtNumSamples = handlesCommon(2);
+edtRamp       = handlesCommon(3);
+edtRandomSeed = handlesCommon(4);
 
-%% === REGULAR wave parameter UI ===
-regularYStart = commonYStart - 130;
-txtH = uicontrol('Parent',ctrlPanel,'Style','text','String','Wave Height, H:',...
-    'HorizontalAlignment','left','Position',[10 regularYStart 120 20]);
-edtH = uicontrol('Parent',ctrlPanel,'Style','edit','String','2.0',...
-    'Position',[130 regularYStart 50 25]);
+yTop = yTop - 10;
 
-txtT = uicontrol('Parent',ctrlPanel,'Style','text','String','Wave Period, T:',...
-    'HorizontalAlignment','left','Position',[10 regularYStart-30 120 20]);
-edtT = uicontrol('Parent',ctrlPanel,'Style','edit','String','8.0',...
-    'Position',[130 regularYStart-30 50 25]);
+%% --------------------------------------------------------------------
+%         4) Regular Wave Parameters (H, T, beta)
+%% --------------------------------------------------------------------
+regLabels = {'Wave Height, H:', 'Wave Period, T:', 'Phase, beta:'};
+regDefault = {'9.96','7.99','0'};
+handlesRegular = [];
 
-txtBeta = uicontrol('Parent',ctrlPanel,'Style','text','String','Phase, beta:',...
-    'HorizontalAlignment','left','Position',[10 regularYStart-60 120 20]);
-edtBeta = uicontrol('Parent',ctrlPanel,'Style','edit','String','0',...
-    'Position',[130 regularYStart-60 50 25]);
+for ii = 1:numel(regLabels)
+    uicontrol('Parent',ctrlPanel,'Style','text','String',regLabels{ii},...
+        'HorizontalAlignment','left',...
+        'Position',[xLabel yTop labelWidth rowHeight]);
+    handlesRegular(ii) = uicontrol('Parent',ctrlPanel,'Style','edit',...
+        'String',regDefault{ii},...
+        'Position',[xEdit yTop editWidth rowHeight]);
+    yTop = yTop - rowHeight - 5;
+end
 
-%% === IRREGULAR wave parameter UI ===
-irrYStart = regularYStart - 100;
-txtSIWAHE = uicontrol('Parent',ctrlPanel,'Style','text','String','Significant Hs:',...
-    'HorizontalAlignment','left','Position',[10 irrYStart 110 20]);
-edtSIWAHE = uicontrol('Parent',ctrlPanel,'Style','edit','String','3.0',...
-    'Position',[130 irrYStart 50 25]);
+edtH    = handlesRegular(1);
+edtT    = handlesRegular(2);
+edtBeta = handlesRegular(3);
 
-txtTpeak = uicontrol('Parent',ctrlPanel,'Style','text','String','Peak Period, Tp:',...
-    'HorizontalAlignment','left','Position',[10 irrYStart-30 110 20]);
-edtTpeak = uicontrol('Parent',ctrlPanel,'Style','edit','String','10.0',...
-    'Position',[130 irrYStart-30 50 25]);
+yTop = yTop - 15;
 
-txtGamma = uicontrol('Parent',ctrlPanel,'Style','text','String','Gamma:',...
-    'HorizontalAlignment','left','Position',[10 irrYStart-60 110 20]);
-edtGamma = uicontrol('Parent',ctrlPanel,'Style','edit','String','3.3',...
-    'Position',[130 irrYStart-60 50 25]);
+%% --------------------------------------------------------------------
+%         5) Irregular Wave Parameters (Plain text labels)
+%% --------------------------------------------------------------------
+irrLabels = { ...
+    'Significant wave height, H_s:', ...
+    'Peak period, T_p:', ...
+    'Peakedness parameter, γ:', ...
+    'Peak frequency, ω_p:', ...
+    'Spectrum parameter, α:', ...
+    'Form parameter, β:', ...
+    'Spectrum parameter, σ_a:', ...
+    'Spectrum parameter, σ_b:', ...
+    'Average wave period, T_{avg}:', ...
+    'Zero-crossing wave period, T_z:'};
 
-% 6-param JONSWAP
-txtOmegaP = uicontrol('Parent',ctrlPanel,'Style','text','String','Omega_p:',...
-    'HorizontalAlignment','left','Position',[10 irrYStart-90 110 20]);
-edtOmegaP = uicontrol('Parent',ctrlPanel,'Style','edit','String','0.6283',...
-    'Position',[130 irrYStart-90 50 25]);
+irrDefaults = {'3.0','10.0','3.3','0.6283','0.0081','1.25','0.07','0.09','6.0','7.0'};
+handlesIrr = [];
 
-txtAlpha = uicontrol('Parent',ctrlPanel,'Style','text','String','Alpha:',...
-    'HorizontalAlignment','left','Position',[10 irrYStart-120 110 20]);
-edtAlpha = uicontrol('Parent',ctrlPanel,'Style','edit','String','0.0081',...
-    'Position',[130 irrYStart-120 50 25]);
+for ii = 1:numel(irrLabels)
+    uicontrol('Parent', ctrlPanel, ...
+        'Style', 'text', ...
+        'String', irrLabels{ii}, ...
+        'HorizontalAlignment', 'left', ...
+        'Position', [xLabel, yTop, labelWidth, rowHeight]);
 
-txtBetaVal = uicontrol('Parent',ctrlPanel,'Style','text','String','Beta:',...
-    'HorizontalAlignment','left','Position',[10 irrYStart-150 110 20]);
-edtBetaVal = uicontrol('Parent',ctrlPanel,'Style','edit','String','1.25',...
-    'Position',[130 irrYStart-150 50 25]);
+    handlesIrr(ii) = uicontrol('Parent', ctrlPanel, ...
+        'Style', 'edit', ...
+        'String', irrDefaults{ii}, ...
+        'Position', [xEdit, yTop, editWidth, rowHeight]);
 
-txtSigA = uicontrol('Parent',ctrlPanel,'Style','text','String','Sigma_a:',...
-    'HorizontalAlignment','left','Position',[10 irrYStart-180 110 20]);
-edtSigA = uicontrol('Parent',ctrlPanel,'Style','edit','String','0.07',...
-    'Position',[130 irrYStart-180 50 25]);
+    yTop = yTop - (rowHeight + 5);
+end
 
-txtSigB = uicontrol('Parent',ctrlPanel,'Style','text','String','Sigma_b:',...
-    'HorizontalAlignment','left','Position',[10 irrYStart-210 110 20]);
-edtSigB = uicontrol('Parent',ctrlPanel,'Style','edit','String','0.09',...
-    'Position',[130 irrYStart-210 50 25]);
+edtSIWAHE  = handlesIrr(1);
+edtTpeak   = handlesIrr(2);
+edtGamma   = handlesIrr(3);
+edtOmegaP  = handlesIrr(4);
+edtAlpha   = handlesIrr(5);
+edtBetaVal = handlesIrr(6);
+edtSigA    = handlesIrr(7);
+edtSigB    = handlesIrr(8);
+edtTavg    = handlesIrr(9);
+edtTzc     = handlesIrr(10);
 
-% PM 2-param with Tavg or Tzc
-txtTavg = uicontrol('Parent',ctrlPanel,'Style','text','String','Tavg:',...
-    'HorizontalAlignment','left','Position',[10 irrYStart-240 110 20]);
-edtTavg = uicontrol('Parent',ctrlPanel,'Style','edit','String','6.0',...
-    'Position',[130 irrYStart-240 50 25]);
+%% --------------------------------------------------------------------
+%    6) Bottom Buttons: Plot, Generate ASCII, Save Wave Data
+%% --------------------------------------------------------------------
+btnWidth  = 100;
+btnHeight = 30;
+spacing   = 10;
+yBottom = 40;  % vertical position for bottom row buttons
 
-txtTzc = uicontrol('Parent',ctrlPanel,'Style','text','String','Tzc:',...
-    'HorizontalAlignment','left','Position',[10 irrYStart-270 110 20]);
-edtTzc = uicontrol('Parent',ctrlPanel,'Style','edit','String','7.0',...
-    'Position',[130 irrYStart-270 50 25]);
-
-%% === Buttons (Plot, Save Config, Load Config, Generate ASCII, Save Data) ===
-btnYPos = 30;
-
-% Plot button
-btnPlot = uicontrol('Parent',ctrlPanel,'Style','pushbutton','String','Plot Wave',...
-    'FontWeight','bold',...
-    'Position',[10 btnYPos 80 40],...
+% Plot Wave
+btnPlot = uicontrol('Parent',ctrlPanel,'Style','pushbutton',...
+    'Position',[xLabel yBottom btnWidth+20 btnHeight],...
+    'String','Plot Wave','FontWeight','bold',...
     'Callback',@onPlotWave);
 
-% Generate ASCII
-btnGen = uicontrol('Parent',ctrlPanel,'Style','pushbutton','String','Generate ASCII',...
-    'Position',[100 btnYPos 100 40],...
-    'Callback',@onGenerateASCII);
-
-% Save config
-btnSave = uicontrol('Parent',ctrlPanel,'Style','pushbutton','String','Save Config',...
-    'Position',[210 btnYPos 80 20],...
-    'Callback',@onSaveConfig);
-
-% Load config
-btnLoad = uicontrol('Parent',ctrlPanel,'Style','pushbutton','String','Load Config',...
-    'Position',[210 btnYPos+20 80 20],...
-    'Callback',@onLoadConfig);
-
-% NEW: Save wave data
-btnSaveData = uicontrol('Parent',ctrlPanel,'Style','pushbutton','String','Save Wave Data',...
-    'Position',[10 btnYPos-40 130 30],...
+% Save Wave Data
+btnSaveData = uicontrol('Parent',ctrlPanel,'Style','pushbutton',...
+    'String','Save Wave Data',...
+    'Position',[xLabel+btnWidth+spacing+20 yBottom btnWidth btnHeight],...
     'Callback',@onSaveWaveData);
 
-%% === Store handles in the figure's UserData & do initial update
+% Generate ASCII
+btnGen = uicontrol('Parent',ctrlPanel,'Style','pushbutton',...
+    'String','Generate ASCII',...
+    'Position',[xLabel+(btnWidth+spacing+20)*1.85 yBottom btnWidth+20 btnHeight],...
+    'Callback',@onGenerateASCII);
+
+%% --------------------------------------------------------------------
+%             Store Handles in the Figure's UserData
+%% --------------------------------------------------------------------
 handles.ax = ax;
-handles.waveTypePopup    = waveTypePopup;
-handles.spectrumPopup    = spectrumPopup;
-handles.modelList        = modelList;          % store the list of spectrum models
-handles.edtTimeStep     = edtTimeStep;
-handles.edtNumSamples   = edtNumSamples;
-handles.edtRamp         = edtRamp;
-handles.edtRandomSeed   = edtRandomSeed;
 
-handles.txtH       = txtH;         handles.edtH       = edtH;
-handles.txtT       = txtT;         handles.edtT       = edtT;
-handles.txtBeta    = txtBeta;      handles.edtBeta    = edtBeta;
+handles.waveTypePopup  = waveTypePopup;
+handles.spectrumPopup  = spectrumPopup;
+handles.modelList      = modelList;
 
-handles.txtSIWAHE  = txtSIWAHE;    handles.edtSIWAHE  = edtSIWAHE;
-handles.txtTpeak   = txtTpeak;     handles.edtTpeak   = edtTpeak;
-handles.txtGamma   = txtGamma;     handles.edtGamma   = edtGamma;
-handles.txtOmegaP  = txtOmegaP;    handles.edtOmegaP  = edtOmegaP;
-handles.txtAlpha   = txtAlpha;     handles.edtAlpha   = edtAlpha;
-handles.txtBetaVal = txtBetaVal;   handles.edtBetaVal = edtBetaVal;
-handles.txtSigA    = txtSigA;      handles.edtSigA    = edtSigA;
-handles.txtSigB    = txtSigB;      handles.edtSigB    = edtSigB;
-handles.txtTavg    = txtTavg;      handles.edtTavg    = edtTavg;
-handles.txtTzc     = txtTzc;       handles.edtTzc     = edtTzc;
+handles.edtTimeStep   = edtTimeStep;
+handles.edtNumSamples = edtNumSamples;
+handles.edtRamp       = edtRamp;
+handles.edtRandomSeed = edtRandomSeed;
 
+handles.edtH      = edtH;
+handles.edtT      = edtT;
+handles.edtBeta   = edtBeta;
+
+handles.edtSIWAHE  = edtSIWAHE;
+handles.edtTpeak   = edtTpeak;
+handles.edtGamma   = edtGamma;
+handles.edtOmegaP  = edtOmegaP;
+handles.edtAlpha   = edtAlpha;
+handles.edtBetaVal = edtBetaVal;
+handles.edtSigA    = edtSigA;
+handles.edtSigB    = edtSigB;
+handles.edtTavg    = edtTavg;
+handles.edtTzc     = edtTzc;
+
+handles.btnLoadCfg = btnLoadCfg;
+handles.btnSaveCfg = btnSaveCfg;
+handles.btnSaveData= btnSaveData;
 handles.btnPlot    = btnPlot;
 handles.btnGen     = btnGen;
-handles.btnSave    = btnSave;
-handles.btnLoad    = btnLoad;
-handles.btnSaveData = btnSaveData;
 
-set(fig, 'UserData', handles);
+set(fig,'UserData',handles);
 
 % Initial UI refresh
-updateUIVisibility();
+updateUIEnable();
 
-%% =============================================================
-%  Nested Callback Functions
-%% =============================================================
+%% ====================================================================
+%  Callbacks
+%% ====================================================================
 
-    function onWaveTypeChanged(~,~)
-        % Callback when user changes waveType popup
-        updateUIVisibility();
-    end
-
-    function onSpectrumModelChanged(~,~)
-        % Callback when user changes the spectrum model
-        updateUIVisibility();
-    end
-
-    function updateUIVisibility()
-        % Show/hide controls depending on waveType (Regular vs. Irregular)
-        handles = get(fig,'UserData');
-
-        val = get(handles.waveTypePopup,'Value');
-        waveTypeList = get(handles.waveTypePopup,'String');
-        waveTypeStr = waveTypeList{val};
-
-        if strcmpi(waveTypeStr,'Regular')
-            % Show regular wave controls
-            set([handles.txtH, handles.edtH,...
-                handles.txtT, handles.edtT,...
-                handles.txtBeta, handles.edtBeta], 'Visible','on');
-            % Hide spectrum popup and irregular fields
-            set(handles.spectrumPopup, 'Enable','off');
-            set([handles.txtSIWAHE, handles.edtSIWAHE, ...
-                handles.txtTpeak,  handles.edtTpeak, ...
-                handles.txtGamma,  handles.edtGamma, ...
-                handles.txtOmegaP, handles.edtOmegaP, ...
-                handles.txtAlpha,  handles.edtAlpha, ...
-                handles.txtBetaVal,handles.edtBetaVal, ...
-                handles.txtSigA,   handles.edtSigA, ...
-                handles.txtSigB,   handles.edtSigB, ...
-                handles.txtTavg,   handles.edtTavg, ...
-                handles.txtTzc,    handles.edtTzc], 'Visible','off');
-        else
-            % Irregular
-            set([handles.txtH, handles.edtH,...
-                handles.txtT, handles.edtT,...
-                handles.txtBeta, handles.edtBeta], 'Visible','off');
-            set(handles.spectrumPopup, 'Enable','on');
-            % Now show/hide sub-fields based on the chosen model
-            modelVal = get(handles.spectrumPopup,'Value');
-            modelStr = handles.modelList{modelVal};
-
-            % Start by turning them all off
-            allIrrCtrls = [handles.txtSIWAHE, handles.edtSIWAHE,...
-                handles.txtTpeak,  handles.edtTpeak,...
-                handles.txtGamma,  handles.edtGamma,...
-                handles.txtOmegaP, handles.edtOmegaP,...
-                handles.txtAlpha,  handles.edtAlpha,...
-                handles.txtBetaVal,handles.edtBetaVal,...
-                handles.txtSigA,   handles.edtSigA,...
-                handles.txtSigB,   handles.edtSigB,...
-                handles.txtTavg,   handles.edtTavg,...
-                handles.txtTzc,    handles.edtTzc];
-            set(allIrrCtrls, 'Visible','off');
-
-            % Turn on relevant fields:
-            switch modelStr
-                case 'JONSWAP 2-param'
-                    set([handles.txtSIWAHE, handles.edtSIWAHE,...
-                        handles.txtTpeak,  handles.edtTpeak], 'Visible','on');
-                case 'JONSWAP 3-param'
-                    set([handles.txtSIWAHE, handles.edtSIWAHE,...
-                        handles.txtTpeak,  handles.edtTpeak,...
-                        handles.txtGamma,  handles.edtGamma], 'Visible','on');
-                case 'JONSWAP 6-param'
-                    set([handles.txtOmegaP, handles.edtOmegaP,...
-                        handles.txtAlpha,  handles.edtAlpha,...
-                        handles.txtBetaVal,handles.edtBetaVal,...
-                        handles.txtGamma,  handles.edtGamma,...
-                        handles.txtSigA,   handles.edtSigA,...
-                        handles.txtSigB,   handles.edtSigB], 'Visible','on');
-                case 'Torsethaugen'
-                    set([handles.txtSIWAHE, handles.edtSIWAHE,...
-                        handles.txtTpeak,  handles.edtTpeak], 'Visible','on');
-                case 'Ochi-Hubble'
-                    set([handles.txtSIWAHE, handles.edtSIWAHE], 'Visible','on');
-                case 'PM (1-param)'
-                    set([handles.txtSIWAHE, handles.edtSIWAHE], 'Visible','on');
-                case 'PM (2-param, Tavg)'
-                    set([handles.txtSIWAHE, handles.edtSIWAHE,...
-                        handles.txtTavg,   handles.edtTavg], 'Visible','on');
-                case 'PM (2-param, Tzc)'
-                    set([handles.txtSIWAHE, handles.edtSIWAHE,...
-                        handles.txtTzc,    handles.edtTzc], 'Visible','on');
-            end
+    function onLoadConfig(~,~)
+        [fileName, pathName] = uigetfile('*.mat','Load Configuration');
+        if fileName == 0, return; end
+        S = load(fullfile(pathName,fileName),'cfg');
+        if isfield(S,'cfg')
+            setParams(S.cfg);
+            updateUIEnable();
         end
     end
 
+    function onSaveConfig(~,~)
+        [fileName, pathName] = uiputfile('*.mat','Save Configuration');
+        if fileName == 0, return; end
+        cfg = getAllParams();
+        save(fullfile(pathName,fileName),'cfg');
+    end
+
+    function onWaveTypeChanged(~,~)
+        updateUIEnable();
+    end
+
+    function onSpectrumModelChanged(~,~)
+        updateUIEnable();
+    end
+
     function onPlotWave(~,~)
-        % Read params, generate wave, plot on the axes
+        % Show "Please wait" box
+        hWait = msgbox('Generating wave. Please wait...','Please wait','help');
+        drawnow;  % Ensure the message appears
+
+        % Generate wave
         [t, eta] = generateWaveFromGUI();
+
+        % Close "Please wait" box
+        if isvalid(hWait), close(hWait); end
+
+        % Show "success" box that auto-closes in 5 seconds
+        hSuccess = msgbox('Wave generation complete!','Success');
+        pause(5);
+        if isvalid(hSuccess), close(hSuccess); end
+
+        % Plot the result
         axes(handles.ax); %#ok<LAXES>
         cla(handles.ax);
-        plot(handles.ax, t, eta,'b-','LineWidth',1.2);
+        plot(handles.ax, t, eta, 'b-','LineWidth',1.2);
         grid(handles.ax,'on');
         xlabel(handles.ax,'Time [s]');
         ylabel(handles.ax,'\eta(t) [m]');
@@ -328,12 +324,24 @@ updateUIVisibility();
     end
 
     function onGenerateASCII(~,~)
-        % Generate wave, then prompt user for output file
+        % Show "Please wait" box
+        hWait = msgbox('Generating wave. Please wait...','Please wait','help');
+        drawnow;
+
         [t, eta] = generateWaveFromGUI();
+
+        if isvalid(hWait), close(hWait); end
+
+        % Show success (auto-close)
+        hSuccess = msgbox('Wave generation complete!','Success');
+        pause(5);
+        if isvalid(hSuccess), close(hSuccess); end
+
+        % Now ask user for file name
         prompt = {'Enter output ASCII file name:'};
         dlgTitle = 'Generate SIMA ASCII';
         def = {'waveElevation_sima.dat'};
-        answer = inputdlg(prompt, dlgTitle, [1 60], def);
+        answer = inputdlg(prompt,dlgTitle,[1 60],def);
         if isempty(answer), return; end
         outFileName = answer{1};
 
@@ -342,59 +350,112 @@ updateUIVisibility();
         msgbox(['Wrote wave time series to ', outFileName],'Success','modal');
     end
 
-    function onSaveConfig(~,~)
-        % Save current GUI parameters to a .MAT file
-        [fileName, pathName] = uiputfile('*.mat','Save Configuration');
-        if fileName == 0, return; end
-        cfg = getAllParams();
-        save(fullfile(pathName, fileName), 'cfg');
-    end
-
-    function onLoadConfig(~,~)
-        % Load .MAT file and populate the GUI
-        [fileName, pathName] = uigetfile('*.mat','Load Configuration');
-        if fileName == 0, return; end
-        S = load(fullfile(pathName, fileName),'cfg');
-        if isfield(S,'cfg')
-            setParams(S.cfg);
-            updateUIVisibility();
-        end
-    end
-
     function onSaveWaveData(~,~)
-        % NEW: Save wave data (time, eta) + config into a single .mat
-        [t, eta] = generateWaveFromGUI();
-        cfg = getAllParams();
+        % Show "Please wait" box
+        hWait = msgbox('Generating wave. Please wait...','Please wait','help');
+        drawnow;
 
+        [t, eta] = generateWaveFromGUI();
+
+        if isvalid(hWait), close(hWait); end
+
+        % Show success (auto-close)
+        hSuccess = msgbox('Wave generation complete!','Success');
+        pause(5);
+        if isvalid(hSuccess), close(hSuccess); end
+
+        % Then prompt for file
+        cfg = getAllParams();
         [fileName, pathName] = uiputfile('*.mat','Save Wave Data');
         if fileName == 0, return; end
 
         waveData.time   = t;
         waveData.eta    = eta;
-        waveData.config = cfg;  % store the config as well
-
-        save(fullfile(pathName, fileName), 'waveData');
+        waveData.config = cfg;
+        save(fullfile(pathName, fileName),'waveData');
         msgbox(['Saved wave data + config to ', fullfile(pathName, fileName)],...
             'Wave Data Saved','modal');
     end
 
-%% =============================================================
-%  Helper Functions
-%% =============================================================
-    function cfg = getAllParams()
-        % Read all GUI fields into a struct
+%% ====================================================================
+%  Enabling/Disabling Controls
+%% ====================================================================
+    function updateUIEnable()
         handles = get(fig,'UserData');
+        waveTypeVal = get(handles.waveTypePopup,'Value');
+        isRegular   = (waveTypeVal == 1); 
 
+        % Regular wave fields
+        set([handles.edtH, handles.edtT, handles.edtBeta], 'Enable', bool2OnOff(isRegular));
+
+        % Irregular wave fields
+        set(handles.spectrumPopup, 'Enable', bool2OnOff(~isRegular));
+
+        if ~isRegular
+            modelVal = get(handles.spectrumPopup,'Value');
+            modelStr = handles.modelList{modelVal};
+            relevantFields = {};
+            switch modelStr
+                case 'JONSWAP 2-param'
+                    relevantFields = {'edtSIWAHE','edtTpeak'};
+                case 'JONSWAP 3-param'
+                    relevantFields = {'edtSIWAHE','edtTpeak','edtGamma'};
+                case 'JONSWAP 6-param'
+                    relevantFields = {'edtOmegaP','edtAlpha','edtBetaVal','edtGamma','edtSigA','edtSigB'};
+                % case 'Torsethaugen'
+                %     relevantFields = {'edtSIWAHE','edtTpeak'};
+                % case 'Ochi-Hubble'
+                %     relevantFields = {'edtSIWAHE'};
+                case 'PM (1-param)'
+                    relevantFields = {'edtSIWAHE'};
+                case 'PM (2-param, Tavg)'
+                    relevantFields = {'edtSIWAHE','edtTavg'};
+                case 'PM (2-param, Tzc)'
+                    relevantFields = {'edtSIWAHE','edtTzc'};
+            end
+
+            allIrrHandles = {'edtSIWAHE','edtTpeak','edtGamma','edtOmegaP','edtAlpha',...
+                'edtBetaVal','edtSigA','edtSigB','edtTavg','edtTzc'};
+
+            for ii=1:numel(allIrrHandles)
+                set(handles.(allIrrHandles{ii}), 'Enable','off');
+            end
+            for ii=1:numel(relevantFields)
+                set(handles.(relevantFields{ii}), 'Enable','on');
+            end
+        else
+            allIrrHandles = {'edtSIWAHE','edtTpeak','edtGamma','edtOmegaP','edtAlpha',...
+                'edtBetaVal','edtSigA','edtSigB','edtTavg','edtTzc'};
+            for ii=1:numel(allIrrHandles)
+                set(handles.(allIrrHandles{ii}), 'Enable','off');
+            end
+        end
+    end
+
+    function str = bool2OnOff(tf)
+        if tf
+            str = 'on';
+        else
+            str = 'off';
+        end
+    end
+
+%% ====================================================================
+%  Get/Set Parameter Struct
+%% ====================================================================
+    function cfg = getAllParams()
+        handles = get(fig,'UserData');
         cfg.waveTypeVal = get(handles.waveTypePopup,'Value');
         cfg.spectrumVal = get(handles.spectrumPopup,'Value');
-        cfg.tStep       = str2double(get(handles.edtTimeStep,'String'));
-        cfg.nSamples    = str2double(get(handles.edtNumSamples,'String'));
-        cfg.tRamp       = str2double(get(handles.edtRamp,'String'));
-        cfg.rSeed       = str2double(get(handles.edtRandomSeed,'String'));
 
-        cfg.H     = str2double(get(handles.edtH,'String'));
-        cfg.T     = str2double(get(handles.edtT,'String'));
-        cfg.beta  = str2double(get(handles.edtBeta,'String'));
+        cfg.tStep   = str2double(get(handles.edtTimeStep,'String'));
+        cfg.nSamples= str2double(get(handles.edtNumSamples,'String'));
+        cfg.tRamp   = str2double(get(handles.edtRamp,'String'));
+        cfg.rSeed   = str2double(get(handles.edtRandomSeed,'String'));
+
+        cfg.H       = str2double(get(handles.edtH,'String'));
+        cfg.T       = str2double(get(handles.edtT,'String'));
+        cfg.beta    = str2double(get(handles.edtBeta,'String'));
 
         cfg.Hs      = str2double(get(handles.edtSIWAHE,'String'));
         cfg.Tpeak   = str2double(get(handles.edtTpeak,'String'));
@@ -409,11 +470,11 @@ updateUIVisibility();
     end
 
     function setParams(cfg)
-        % Populate GUI fields from cfg struct
         handles = get(fig,'UserData');
 
         set(handles.waveTypePopup,'Value', cfg.waveTypeVal);
         set(handles.spectrumPopup,'Value', cfg.spectrumVal);
+
         set(handles.edtTimeStep,'String', num2str(cfg.tStep));
         set(handles.edtNumSamples,'String', num2str(cfg.nSamples));
         set(handles.edtRamp,'String', num2str(cfg.tRamp));
@@ -436,33 +497,30 @@ updateUIVisibility();
     end
 
     function [t, eta] = generateWaveFromGUI()
-        % Gather all GUI params, produce the time vector and wave series
         cfg = getAllParams();
-        dt = cfg.tStep;
-        N  = cfg.nSamples;
-        t  = (0:N-1).'*dt;
+        dt  = cfg.tStep;
+        N   = cfg.nSamples;
+        t   = (0:N-1).'*dt;
 
         switch cfg.waveTypeVal
-            case 1 % Regular
+            case 1 % Regular wave
                 omega = 2*pi/cfg.T;
                 rampFactor = rampUp(t, cfg.tRamp);
                 eta = 0.5*cfg.H * cos(omega*t + cfg.beta) .* rampFactor;
             otherwise
-                % Irregular
                 rng(cfg.rSeed);
                 modelStr = handles.modelList{cfg.spectrumVal};
-                specFun = @(w) 0;
                 switch modelStr
                     case 'JONSWAP 2-param'
-                        specFun = @(w) jonswap2(w, cfg.Hs, cfg.Tpeak);
+                        specFun = @(w) jonswap2_skipZero(w, cfg.Hs, cfg.Tpeak);
                     case 'JONSWAP 3-param'
-                        specFun = @(w) jonswap3(w, cfg.Hs, cfg.Tpeak, cfg.gamma);
+                        specFun = @(w) jonswap3_skipZero(w, cfg.Hs, cfg.Tpeak, cfg.gamma);
                     case 'JONSWAP 6-param'
                         specFun = @(w) jonswap6(w, cfg.omegaP, cfg.alpha, cfg.betaVal, cfg.gamma, cfg.sigA, cfg.sigB);
-                    case 'Torsethaugen'
-                        specFun = @(w) torsethaugenSpectrum(w, cfg.Hs, cfg.Tpeak);
-                    case 'Ochi-Hubble'
-                        specFun = @(w) ochiHubbleSpectrum(w, cfg.Hs);
+                    % case 'Torsethaugen'
+                    %     specFun = @(w) torsethaugenSpectrum_skipZero(w, cfg.Hs, cfg.Tpeak);
+                    % case 'Ochi-Hubble'
+                    %     specFun = @(w) ochiHubbleSpectrum_skipZero(w, cfg.Hs);
                     case 'PM (1-param)'
                         specFun = @(w) pmSpectrum1(w, cfg.Hs);
                     case 'PM (2-param, Tavg)'
@@ -473,13 +531,13 @@ updateUIVisibility();
                 eta = generateIrregularWave(t, cfg.tRamp, specFun);
         end
     end
+
 end
 
 %% ========================================================================
 %  Wave Utility Functions
 %% ========================================================================
 function r = rampUp(t, t_ramp)
-% Simple linear ramp from 0 to 1 over [0, t_ramp].
 r = ones(size(t));
 idx = (t < t_ramp);
 r(idx) = t(idx)/t_ramp;
@@ -488,17 +546,15 @@ end
 function eta = generateIrregularWave(t, t_ramp, specFun)
 N = length(t);
 dt = t(2)-t(1);
-
 df = 1/(N*dt);
 f  = (0:(N-1)).'*df;
 w  = 2*pi*f;
 
-% Evaluate spectral density
 S = specFun(w);
-S(w<=0) = 0;
+S(w<=0) = 0;  % Hard‐zero at w <= 0, just in case
 
 dw = 2*pi*df;
-A  = sqrt(2*S*dw);
+A  = sqrt(2*S.*dw);
 phi = 2*pi*rand(size(w));
 
 Npos = floor(N/2);
@@ -508,37 +564,109 @@ for i = 2:Npos
 end
 
 rampFactor = rampUp(t, t_ramp);
-eta = rampFactor.*eta_temp;
+eta = rampFactor .* eta_temp;
 end
 
-%% ------------------- Example Spectral Models (placeholders) -------------------
-function S = jonswap2(w, Hs, Tp)
+%% -- JONSWAP 2/3 with zero-frequency skip --
+function S = jonswap2_skipZero(w, Hs, Tp)
 g = 9.81;
+S = zeros(size(w));
+idx = (w>0);
+w_ = w(idx);
+
 wp = 2*pi/Tp;
 alpha_PM = 0.0081*g^2;
-gamma = 3.3; % typical
-sigma = 0.07.*(w<=wp) + 0.09.*(w>wp);
+gammaVal = 3.3;
+sigma = 0.07.*(w_<=wp) + 0.09.*(w_>wp);
 
-S = alpha_PM./(w.^5).*exp(-5/4*(wp./w).^4);
-exponent = exp(-((w - wp).^2)./(2*sigma.^2*wp.^2));
-S = S.*(gamma.^exponent);
+S_temp = alpha_PM ./ (w_.^5) .* exp(-5/4*(wp./w_).^4);
+exponent = exp(- ((w_ - wp).^2)./(2*sigma.^2*wp.^2));
+S_temp = S_temp .* (gammaVal.^exponent);
 
-S = scaleSpectrumToHs(S,w,Hs);
+S(idx) = scaleSpectrumToHs(S_temp, w_, Hs);
 end
 
-function S = jonswap3(w, Hs, Tp, gammaVal)
+function S = jonswap3_skipZero(w, Hs, Tp, gammaVal)
 g = 9.81;
+S = zeros(size(w));
+idx = (w>0);
+w_ = w(idx);
+
 wp = 2*pi/Tp;
 alpha_PM = 0.0081*g^2;
-sigma = 0.07.*(w<=wp) + 0.09.*(w>wp);
+sigma = 0.07.*(w_<=wp) + 0.09.*(w_>wp);
 
-S = alpha_PM./(w.^5).*exp(-5/4*(wp./w).^4);
-exponent = exp(-((w-wp).^2)./(2*sigma.^2.*wp.^2));
-S = S.*(gammaVal.^exponent);
+S_temp = alpha_PM./(w_.^5).*exp(-5/4*(wp./w_).^4);
+exponent = exp(-((w_-wp).^2)./(2*sigma.^2.*wp.^2));
+S_temp = S_temp.*(gammaVal.^exponent);
 
-S = scaleSpectrumToHs(S,w,Hs);
+S(idx) = scaleSpectrumToHs(S_temp, w_, Hs);
 end
 
+function S = torsethaugenSpectrum(w, Hs, Tp)
+% torsethaugenSpectrum
+% A simplified double-peaked Torsethaugen-type spectrum.
+%
+% Inputs:
+%   w  : angular frequencies (vector), w >= 0
+%   Hs : total significant wave height
+%   Tp : (user-chosen) peak period of primary system
+%
+% Outputs:
+%   S  : spectral density [m^2·s/rad] for each w
+%
+% References:
+%  - Torsethaugen (2004), "Simplified Double Peak Spectrum" approach
+%  - Paper No. 2004-JSC-193
+
+% ---- 1) Decide how to split Hs between two peaks
+% For demonstration, let's do 80% energy in primary peak, 20% in secondary
+Hs1 = 0.8 * Hs; 
+Hs2 = sqrt(Hs^2 - Hs1^2);  % so that Hs^2 = Hs1^2 + Hs2^2
+
+% ---- 2) Assign periods
+Tp1 = Tp;        % primary system
+deltaOffset = 3; % e.g. 3-second offset for secondary peak
+Tp2 = Tp + deltaOffset;
+
+% ---- 3) Peakedness factors
+gamma1 = 3.3;   % typical for primary
+gamma2 = 1.0;   % secondary often set to 1 (no peak enhancement)
+
+% ---- 4) Build each partial spectrum with a JONSWAP-like formula
+S1 = jonswapPartial(w, Hs1, Tp1, gamma1);
+S2 = jonswapPartial(w, Hs2, Tp2, gamma2);
+
+% ---- 5) Sum to get final double-peaked spectrum
+S = S1 + S2;
+
+end
+
+function Sj = jonswapPartial(w, Hs_j, Tp_j, gamma_j)
+% jonswapPartial: a JONSWAP-like partial spectrum, scaled to (Hs_j, Tp_j).
+g = 9.81;
+Sj = zeros(size(w));
+idx = (w > 0);
+w_ = w(idx);
+
+wp_j = 2*pi / Tp_j;
+alpha_PM = 0.0081*g^2;  
+sigma = 0.07.*(w_<=wp_j) + 0.09.*(w_>wp_j);
+
+% Pierson-Moskowitz core
+S_base = alpha_PM ./ (w_.^5) .* exp(-5/4*(wp_j./w_).^4);
+% JONSWAP peak enhancement
+exponent = exp(-((w_-wp_j).^2)./(2*sigma.^2.*wp_j.^2));
+S_g = S_base .* (gamma_j.^exponent);
+
+% Scale to match partial Hs_j
+S_g = scaleSpectrumToHs(S_g, w_, Hs_j);
+
+% Insert back into original vector
+Sj(idx) = S_g;
+end
+
+%% ------------------- JONSWAP 6-param, PM variants (unchanged) -----------
 function S = jonswap6(w, w_p, alpha, betaVal, gammaVal, sigA, sigB)
 g = 9.81;
 S = zeros(size(w));
@@ -552,28 +680,15 @@ G = gammaVal.^peakExp;
 
 S_(idx) = S_PM.*G;
 S = S_;
-% If you want to force a certain Hs, do: S = scaleSpectrumToHs(S, w, desiredHs)
-end
-
-function S = torsethaugenSpectrum(w, Hs, Tp)
-% Placeholder
-S = jonswap2(w, Hs, Tp);
-end
-
-function S = ochiHubbleSpectrum(w, Hs)
-% Placeholder
-TpeakFake = 8.0;
-S = jonswap2(w, Hs, TpeakFake);
 end
 
 function S = pmSpectrum1(w, Hs)
 g = 9.81;
 alpha = 0.0081;
-% guess a peak freq from Hs
+% guess a peak freq:
 w_p = 0.44*g/((Hs/4)^1.0);
 S = alpha*g^2./(w.^5).*exp(-1.25*(w_p./w).^4);
 S(w<=0) = 0;
-
 S = scaleSpectrumToHs(S,w,Hs);
 end
 
@@ -595,14 +710,21 @@ S(w<=0) = 0;
 S = scaleSpectrumToHs(S,w,Hs);
 end
 
-function Sscaled = scaleSpectrumToHs(S, w, Hs)
-% Numeric integration of S(omega) => m0
-% Hs_model = 4 * sqrt(m0)
-dw = mean(diff(w));
-m0 = trapz(w,S);
+%% ------------------------------------------------------------------------
+%  scaleSpectrumToHs for sub-spectra that skip zero freq
+%% ------------------------------------------------------------------------
+function Sscaled = scaleSpectrumToHs(S_partial, w_partial, Hs)
+% S_partial is already zero where w<=0. w_partial = w(idx>0).
+% We do a numeric integral of S_partial over w_partial:
+dw = mean(diff(w_partial));
+m0 = trapz(w_partial, S_partial);
 Hs_model = 4*sqrt(m0);
-scaleFactor = (Hs / Hs_model)^2;
-Sscaled = S*scaleFactor;
+if Hs_model == 0
+    Sscaled = S_partial; % edge case: no scaling
+else
+    scaleFactor = (Hs / Hs_model)^2;
+    Sscaled = S_partial * scaleFactor;
+end
 end
 
 %% ========================================================================
@@ -613,10 +735,11 @@ fid = fopen(outFileName, 'w');
 if fid < 0
     error('Could not open file: %s', outFileName);
 end
+
 N = length(eta);
 
-fprintf(fid, '%d\n', N);
-fprintf(fid, '%.4f\n', t_step);
+fprintf(fid, '%d\n', N);            % Number of samples
+fprintf(fid, '%.4f\n', t_step);    % Time step
 fprintf(fid, 'Generated by waveGUI\n');
 fprintf(fid, 'Wave elevation time series\n');
 
@@ -634,3 +757,4 @@ if mod(N, valsPerLine) ~= 0
 end
 fclose(fid);
 end
+

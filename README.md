@@ -1,59 +1,70 @@
 # Wave Generation and SIMA File Export Tool
 
-**Author:** Shuijin LI  
+**Author:** Shuijin Li  
 **Email:** <lishuijin@nbu.edu.cn>  
 **Date:** 2025.03.06
 
-This MATLAB GUI tool allows users to generate wave time series and export the data as ASCII files in the SIMA format.
+This MATLAB GUI enables users to generate wave time series while seamlessly exporting the data to SIMA-compatible ASCII files. Its intuitive interface allows both beginners and advanced users to configure and visualize wave simulations quickly.
 
 ## Overview
 
-The heart of this tool is the `waveGUI.m` file, which provides an intuitive interface for:
+At the core of the tool is the `waveGUI.m` file, which combines robust spectrum modeling and data export functionalities. The GUI supports:
 
-- Selecting the wave type (Regular or Irregular, with multiple spectrum models)
-- Configuring simulation parameters such as time step, number of samples, ramp duration, and random seed
-- Plotting the generated wave time series
-- Exporting waves to SIMA-compatible ASCII files
-- Saving and loading configuration settings
+- Selection between Regular and Irregular wave types.
+- Multiple spectrum models including various JONSWAP parameters and PM variations.
+- Custom simulation parameters: time step, sample count, ramp duration, and random seed.
+- Real-time preview of generated wave elevation.
+- Configuration management with option to save and load settings.
 
 ## Features
 
-- **Wave Type Selection:** Toggle between Regular and Irregular waves.
-- **Spectrum Models:** Choose from several options including JONSWAP, Torsethaugen, Ochi-Hubble, and PM variations.
-- **Visualization:** Display the wave elevation in the GUI for real-time preview.
-- **Configuration Management:** Quickly save or restore your simulation settings.
-- **SIMA ASCII Export:** Easily create formatted text files for further analysis.
+- **Wave Type & Spectrum Model:**  
+    Easily switch between Regular and Irregular wave generation. For irregular waves, choose from models such as JONSWAP (different parameter sets) and PM variations.
+
+- **Simulation Parameters:**  
+    Configure essential values like time step, number of samples, and ramp duration to tailor the simulation to your needs.
+
+- **Visualization:**  
+    A built-in plotting area provides a real-time preview of the wave elevation, ensuring quick feedback on parameter adjustments.
+
+- **Data Export:**  
+    Export the generated wave data as a SIMA-formatted ASCII file, perfect for further analysis or integration into other tools.
+
+- **Configuration Management:**  
+    Use the Load/Save configuration options to quickly restore previous simulation settings or share configurations with colleagues.
 
 ## Prerequisites
 
-- MATLAB environment to run the GUI.
-- Basic knowledge of MATLAB GUIs is beneficial.
+- MATLAB (with GUI support) is required to run the `waveGUI.m` file.
+- Familiarity with MATLAB scripting and basic GUI interactions is helpful.
 
 ## How to Use
 
 1. **Launch the GUI:**
-    - Run the `waveGUI.m` file in MATLAB by entering:
+     - Run the `waveGUI.m` file in MATLAB:
+         ```
+         >> waveGUI
+         ```
 
-      ```
-      >> waveGUI
-      ```
+2. **Configure the Simulation:**
+     - Select the wave type and corresponding spectrum model.
+     - Set parameters for the simulation including time step, number of samples, ramp duration, etc.
 
-2. **Set Simulation Parameters:**
-    - Choose the wave type and corresponding spectrum model.
-    - Define parameters such as time step, number of samples, ramp duration, etc.
 3. **Preview the Wave:**
-    - Click **Plot Wave** to visualize the generated wave.
-4. **Export the Data:**
-    - Click **Generate ASCII** to save the wave elevation in a SIMA-formatted ASCII file.
+     - Click **Plot Wave** to generate and visualize the wave elevation in the GUI.
+
+4. **Export Data:**
+     - Use the **Generate ASCII** button to produce a SIMA-formatted ASCII file containing the wave data.
+
 5. **Manage Configurations:**
-    - Use **Save Config** and **Load Config** to handle your simulation settings.
+     - Save your settings using **Save Config** and reload them later with **Load Config** for quick setup changes.
 
 ## File Structure
 
-- `waveGUI.m` – Main MATLAB file containing the GUI and related functions.
-- `README.md` – This documentation file.
-- Additional helper functions embedded within `waveGUI.m` for spectrum calculations, ramping, and file I/O operations.
+- `waveGUI.m` – Main MATLAB file including the GUI and related functions.
+- `README.md` – This updated documentation file.
+- Additional helper functions for spectrum calculations, data ramping, and file I/O operations are embedded within `waveGUI.m`.
 
 ## License
 
-Please see the accompanying license file or documentation for details regarding usage rights and restrictions.
+This project is licensed under the MIT License. See the accompanying LICENSE file for detailed usage rights and restrictions.
