@@ -54,7 +54,7 @@ ctrlPanel = uipanel('Parent',fig,...
 
 % Split the plotting area into top (spectrum) and bottom (time-domain)
 plotPanelHeight = figHeight - 120;
-axWidth  = figWidth - (panelWidth + 80);
+axWidth  = figWidth - (panelWidth + 70);
 axHeight = floor(plotPanelHeight / 2) - 40;
 
 % Top axis: spectrum
@@ -598,7 +598,7 @@ updateUIEnable();
             % Regular wave
             omega = 2*pi/cfg.T;
             rampFactor = rampUp(t, cfg.tRamp);
-            eta = 0.5*cfg.H * cos(omega*t + cfg.beta) .* rampFactor;
+            eta = 0.5*cfg.H * sin(omega*t + cfg.beta) .* rampFactor;
         else
             % Irregular wave
             rng(cfg.rSeed);
