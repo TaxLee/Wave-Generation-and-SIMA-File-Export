@@ -11,8 +11,8 @@ function waveGUI_v3()
 %   - Supports generating Regular waves and various Irregular waves.
 %   - Multiple spectral models available:
 %       * JONSWAP (2-param, 3-param, 6-param)
-%       * Torsethaugen (enhanced implementation)
-%       * Ochi-Hubble (enhanced implementation)
+%       * Torsethaugen (testing)
+%       * Ochi-Hubble (testing)
 %       * PM variants (1-param, 2-param with Tavg or Tzc)
 %   - Displays all parameters in one window with an improved, intuitive layout.
 %   - Dynamically disables irrelevant input fields based on the selected wave/spectrum model.
@@ -20,8 +20,18 @@ function waveGUI_v3()
 %   - Includes load/save configuration options.
 %   - Provides feedback using a "please wait" popup during wave generation along with an
 %     auto‐closing success message.
+%   - Updated ASCII file generator: The output file begins with the sample count and time step,
+%     followed by a header containing tool info, a parameter description line, and then the wave data.
+%
+% Output File Format:
+%   - Line 1: Number of data points (integer).
+%   - Line 2: Time step (floating point with 4 decimal places).
+%   - Line 3: Header comment line detailing generator info and author contact.
+%   - Line 4: Parameter settings string.
+%   - Subsequent lines: Wave elevation values (each printed in a fixed 12.6f format).
 %
 % Version Log:
+%   v3.1 - 2025.03.10 : Updated ASCII file generator with expanded header and output file format specification.
 %   v3.0 - 2025.03.07 : Integrated updated Torsethaugen and Ochi-Hubble implementations.
 %   v2.1 - 2025.03.06 : Updated simulation parameter controls and layout adjustments.
 %   v2.0 - 2025.03.06 : Introduced both regular and irregular wave generation methods with improved logic.
@@ -197,7 +207,7 @@ irrLabels = { ...
     'Average wave period, T_{avg}:', ...
     'Zero-crossing wave period, T_z:'};
 
-irrDefaults = {'3.0','10.0','3.3','0.6283','0.0081','1.25','0.07','0.09','6.0','7.0'};
+irrDefaults = {'5.43','7.99','3.3','0.6283','0.0081','1.25','0.07','0.09','6.0','7.0'};
 handlesIrr = [];
 
 for ii = 1:numel(irrLabels)
@@ -372,14 +382,17 @@ updateUIEnable();
 
     function onGenerateASCII(~,~)
         [t, eta] = getOrGenerateWaveData();
-        getOrComputeSpectrum();  % ensures the spectrum is also up to date (if desired)
+        [wPlot, SPlot] = getOrComputeSpectrum();  %#ok<ASGLU>
+        % We only need wPlot, SPlot if you want to do something with them,
+        % but ensure the spectrum is also up-to-date if needed.
 
         [fileName, pathName] = uiputfile('waveElevation_sima.dat','Generate SIMA ASCII');
         if fileName == 0, return; end
         outFileName = fullfile(pathName,fileName);
 
         dt = t(2) - t(1);
-        writeSIMAAscii(outFileName, eta, dt);
+        cfg = getAllParams();  % <--- get the current config
+        writeSIMAAscii(outFileName, eta, dt, cfg);
         setStatus(sprintf('Wrote wave time series to %s', outFileName));
     end
 
@@ -387,18 +400,18 @@ updateUIEnable();
 %  Helper: Clear cached wave data
 %% ====================================================================
     function clearWaveCache()
-        handles = get(fig,'UserData');
-        handles.lastWave = [];
-        handles.lastSpec = [];
-        set(fig,'UserData',handles);
+        handlesC = get(fig,'UserData');
+        handlesC.lastWave = [];
+        handlesC.lastSpec = [];
+        set(fig,'UserData',handlesC);
     end
 
 %% ====================================================================
 %  Helper: Set status message
 %% ====================================================================
     function setStatus(msg)
-        handles = get(fig,'UserData');
-        set(handles.statusLabel, 'String', ['Status: ', msg]);
+        handlesC = get(fig,'UserData');
+        set(handlesC.statusLabel, 'String', ['Status: ', msg]);
         drawnow;
     end
 
@@ -453,11 +466,13 @@ updateUIEnable();
         fA = sort(fieldnames(cfg1));
         fB = sort(fieldnames(cfg2));
         if ~isequal(fA,fB)
-            tf = false; return;
+            tf = false;
+            return;
         end
         for fn = 1:numel(fA)
             if ~isequal(cfg1.(fA{fn}), cfg2.(fA{fn}))
-                tf = false; return;
+                tf = false;
+                return;
             end
         end
         tf = true;
@@ -488,13 +503,9 @@ updateUIEnable();
                     relevantFields = {'edtSIWAHE','edtTpeak','edtGamma'};
                 case 'JONSWAP 6-param'
                     relevantFields = {'edtOmegaP','edtAlpha','edtBetaVal','edtGamma','edtSigA','edtSigB'};
-                case 'Torsethaugen'
-                    % We will assume user only needs: Hs (SIWAHE) & Tpeak
-                    % (Similar to the original placeholders).
+                case 'Torsethaugen (testing)'
                     relevantFields = {'edtSIWAHE','edtTpeak'};
-                case 'Ochi-Hubble'
-                    % Minimal user input: just Hs (SIWAHE).
-                    % You could add more fields if you want 6 param inputs.
+                case 'Ochi-Hubble (testing)'
                     relevantFields = {'edtSIWAHE'};
                 case 'PM (1-param)'
                     relevantFields = {'edtSIWAHE'};
@@ -610,9 +621,9 @@ updateUIEnable();
                     specFun = @(w) jonswap3_skipZero(w, cfg.Hs, cfg.Tpeak, cfg.gamma);
                 case 'JONSWAP 6-param'
                     specFun = @(w) jonswap6(w, cfg.omegaP, cfg.alpha, cfg.betaVal, cfg.gamma, cfg.sigA, cfg.sigB);
-                case 'Torsethaugen'
+                case 'Torsethaugen (testing)'
                     specFun = @(w) torsethaugenSpectrum_skipZero(w, cfg.Hs, cfg.Tpeak);
-                case 'Ochi-Hubble'
+                case 'Ochi-Hubble (testing)'
                     specFun = @(w) ochiHubbleSpectrum_skipZero(w, cfg.Hs);
                 case 'PM (1-param)'
                     specFun = @(w) pmSpectrum1(w, cfg.Hs);
@@ -644,7 +655,11 @@ updateUIEnable();
         else
             % Irregular wave -> typical range from 0..some max
             modelStr = handles.modelList{cfg.spectrumVal};
-            wMax = 5*(2*pi/cfg.Tpeak); % a default guess for max freq
+            if cfg.Tpeak > 0
+                wMax = 5*(2*pi/cfg.Tpeak); % default guess for max freq
+            else
+                wMax = 5*(2*pi/8); % fallback
+            end
             if strcmp(modelStr,'JONSWAP 6-param') && (cfg.omegaP>0)
                 wMax = max(wMax, 4*cfg.omegaP);
             elseif strcmp(modelStr,'PM (2-param, Tavg)') && (cfg.Tavg>0)
@@ -653,9 +668,9 @@ updateUIEnable();
                 wMax = max(wMax, 5*(2*pi/cfg.Tzc));
             end
             if wMax<2.5, wMax=2.5; end
+
             dw = 0.01;
             wPlot = (0:dw:wMax).';
-
             switch modelStr
                 case 'JONSWAP 2-param'
                     sfun = @(w) jonswap2_skipZero(w, cfg.Hs, cfg.Tpeak);
@@ -663,9 +678,9 @@ updateUIEnable();
                     sfun = @(w) jonswap3_skipZero(w, cfg.Hs, cfg.Tpeak, cfg.gamma);
                 case 'JONSWAP 6-param'
                     sfun = @(w) jonswap6(w, cfg.omegaP, cfg.alpha, cfg.betaVal, cfg.gamma, cfg.sigA, cfg.sigB);
-                case 'Torsethaugen'
+                case 'Torsethaugen (testing)'
                     sfun = @(w) torsethaugenSpectrum_skipZero(w, cfg.Hs, cfg.Tpeak);
-                case 'Ochi-Hubble'
+                case 'Ochi-Hubble (testing)'
                     sfun = @(w) ochiHubbleSpectrum_skipZero(w, cfg.Hs);
                 case 'PM (1-param)'
                     sfun = @(w) pmSpectrum1(w, cfg.Hs);
@@ -780,77 +795,44 @@ S(idx) = S_rad;
 end
 
 function S = torsethaugenSpectrum(f, Hs, Tp)
-% A simplified Torsethaugen approach, focusing on Hs, Tp inputs
-% Double-peaked combination of a wind-sea and a swell system.
-
+% A simplified Torsethaugen approach: combine 2 JONSWAP-like components
 f = f(:);
-% If needed, define how we partition wind vs. swell.
-% For demonstration, we do a straightforward approach:
 [S1, S2] = torsetComponents(f, Hs, Tp);
 S = S1 + S2;
 end
 
 function [S1, S2] = torsetComponents(f, Hs, Tp)
-% Demo partition: wind-sea dominated if Tp < Tpf, else swell-dominated
-% We'll define Tpf ~ 4.9*(Hs^(1/3)) (simple approach),
-% or you can refine with actual Torsethaugen references.
-
-Tpf = 4.9 * (Hs^(1/3));
-if Tp <= Tpf
-    % wind-sea dominated
-    % 80% of variance in primary, 20% in secondary
-    Hswind = 0.8 * Hs;
-    Hsswell= sqrt(Hs^2 - Hswind^2);
-    Tp_wind = Tp;
-    Tp_swell= Tpf + 2.0;
-else
-    % swell-dominated
-    Hsswell = 0.7 * Hs;
-    Hswind  = sqrt(Hs^2 - Hsswell^2);
-    Tp_swell= Tp;
-    Tp_wind = Tpf;
-end
-
-S1 = jonswapPartial(f, Hswind, Tp_wind, 3.3);  % treat wind-sea
-S2 = jonswapPartial(f, Hsswell, Tp_swell, 1.0);% treat swell (gamma=1 => broader)
+Hs1 = 0.6 * Hs;      Tp1 = Tp;      gamma1 = 3.3; % wind sea
+Hs2 = sqrt(Hs^2 - Hs1^2);
+Tp2 = Tp + 4;        gamma2 = 1.0;  % swell (example)
+S1 = jonswapPartial(f, Hs1, Tp1, gamma1);
+S2 = jonswapPartial(f, Hs2, Tp2, gamma2);
 end
 
 function Sj = jonswapPartial(f, Hs_j, Tp_j, gamma_j)
-% Simple partial JONSWAP used inside Torsethaugen
 g = 9.81;
 f = f(:);
-
-% alpha_PM ~ 0.0081 ...
-% We'll do a direct scaling to match Hs_j
-% JONSWAP shape
 wp_j = 2*pi/Tp_j;
-fp_j = 1/Tp_j;
 sigma = 0.07.*(2*pi*f <= wp_j) + 0.09.*(2*pi*f > wp_j);
 
 S_base = 0.0081*g^2 ./ ((2*pi*f).^5) .* exp(-5/4 * (wp_j ./ (2*pi*f)).^4);
 peakEnh = gamma_j.^ (exp(- ( (2*pi*f - wp_j).^2 ) ./ (2*sigma.^2 .* wp_j.^2 )));
 Sj_ = S_base .* peakEnh;
 
-% scale to match Hs_j
 Sj = scaleSpectrumToHs(Sj_, 2*pi*f, Hs_j);
 end
 
 %% ------------------- Ochi-Hubble Implementation -----------------------
 function S = ochiHubbleSpectrum_skipZero(w, Hs)
-% For demonstration, we'll define a simple 2-peak Ochi-Hubble with
-% user-specified total Hs.
-% Real usage might require specifying all 6 parameters.
+% A very simplified approach for Ochi-Hubble: dummy 2-peak with user Hs
 S = zeros(size(w));
 idx = (w>0);
 w_ = w(idx);
 f_ = w_/(2*pi);
 
-% Example: define 2 sets of (Hs_j, Tpj, lambda_j)
-% Let's do a small wind sea plus a bigger swell, just as an example:
-Hs1 = 0.6 * Hs;  Tp1 = 14;  lam1 = 2;
-Hs2 = sqrt(Hs^2 - Hs1^2);
-if Hs2 < 0.1, Hs2=0; end
-Tp2 = 8;        lam2 = 3.3;
+% Just a placeholder: let half go to a big swell, half to a wind sea
+Hs1 = 0.6*Hs;  Tp1 = 12; lam1 = 2;
+Hs2 = sqrt(Hs^2 - Hs1^2);  Tp2 = 8;  lam2 = 3.3;
 
 S_hz = ochiHubbleSpectrum(f_, Hs1, Tp1, lam1, Hs2, Tp2, lam2);
 S_rad = S_hz.*(2*pi);
@@ -858,38 +840,36 @@ S(idx) = S_rad;
 end
 
 function S = ochiHubbleSpectrum(f, Hs1, Tp1, lam1, Hs2, Tp2, lam2)
-% Ochi-Hubble two-term spectrum in [m^2/Hz].
+% 2-term Ochi-Hubble in [m^2/Hz]
 f = f(:);
-fp1 = 1/Tp1;
-fp2 = 1/Tp2;
 
-Gamma1 = gamma(lam1);
-Gamma2 = gamma(lam2);
-
-A1 = ((4*lam1 + 1)/4)^(lam1) * (fp1)^(4*lam1) * Hs1^2/(4 * Gamma1);
-A2 = ((4*lam2 + 1)/4)^(lam2) * (fp2)^(4*lam2) * Hs2^2/(4 * Gamma2);
-
-S1 = A1.* f.^(-(4*lam1 + 1)) .* exp(-(4*lam1 + 1)/4.* (fp1./f).^4);
-S2 = A2.* f.^(-(4*lam2 + 1)) .* exp(-(4*lam2 + 1)/4.* (fp2./f).^4);
-
-S = S1 + S2;
-% Zero out negative/zero freq if any
-S(f<=0)=0;
+S1 = singleOchiHubble(f, Hs1, Tp1, lam1);
+S2 = singleOchiHubble(f, Hs2, Tp2, lam2);
+S  = S1 + S2;
+S(f<=0) = 0;
 end
 
-%% ------------------- PM variants, etc. -------------------------------
+function S1 = singleOchiHubble(f, Hs, Tp, lam)
+fp  = 1/Tp;
+Gamma = gamma(lam);
+A  = ((4*lam + 1)/4)^lam * fp^(4*lam) * (Hs^2)/(4*Gamma);
+S1 = A.* f.^(-(4*lam + 1)) .* exp(-((4*lam + 1)/4).*(fp./f).^4);
+S1(f<=0)=0;
+end
+
+%% ------------------- PM variants -------------------------------------
 function S = pmSpectrum1(w, Hs)
 g = 9.81;
 S = zeros(size(w));
 idx = (w>0);
 w_ = w(idx);
 
-% guess a peak freq from Hs
-A = Hs/4;
-wp = 0.44*g/(A^1.0);
+% naive guess
+A  = Hs/4; % amplitude ~ Hs/2 => a guess for peak
+wp = 0.44*g/A;
 alpha = 0.0081;
-
 S_tmp = alpha*g^2./(w_.^5).*exp(-1.25*(wp./w_).^4);
+
 S(idx) = scaleSpectrumToHs(S_tmp, w_, Hs);
 end
 
@@ -921,7 +901,7 @@ end
 %  scaleSpectrumToHs
 %% ---------------------------------------------------------------------
 function Sscaled = scaleSpectrumToHs(S_partial, w_partial, Hs)
-dw = mean(diff(w_partial));
+% Adjust partial spectrum so its integral gives the desired Hs
 m0 = trapz(w_partial, S_partial);
 Hs_model = 4*sqrt(m0);
 if Hs_model == 0
@@ -933,9 +913,9 @@ end
 end
 
 %% ---------------------------------------------------------------------
-%  Write ASCII for SIMA
+%  Write ASCII for SIMA, now with added lines
 %% ---------------------------------------------------------------------
-function writeSIMAAscii(outFileName, eta, t_step)
+function writeSIMAAscii(outFileName, eta, dt, cfg)
 fid = fopen(outFileName, 'w');
 if fid < 0
     error('Could not open file: %s', outFileName);
@@ -943,21 +923,153 @@ end
 
 N = length(eta);
 fprintf(fid, '%d\n', N);
-fprintf(fid, '%.4f\n', t_step);
-fprintf(fid, 'Generated by waveGUI_v3\n');
-fprintf(fid, 'Author: Shuijin LI; Email: lishuijin@nbu.edu.cn; Github: https://github.com/TaxLee\n');
+fprintf(fid, '%.4f\n', dt);
 
+% --- FIRST COMMENT LINE (tool info, etc.) ---
+fprintf(fid, 'Generated by waveGUI_v3 (v3.0). Author: Shuijin Li (Email: lishuijin@nbu.edu.cn, Github: https://github.com/TaxLee)\n');
+
+% --- SECOND COMMENT LINE (parameters used) ---
+paramLine = buildParameterLine(cfg);
+fprintf(fid, '%s\n', paramLine);
+
+% Then we write the wave elevation data
 valsPerLine = 1;
 for i = 1:N
     fprintf(fid, '%12.6f', eta(i));
     if mod(i, valsPerLine)==0
         fprintf(fid,'\n');
-    else
-        fprintf(fid,'');
     end
 end
 if mod(N,valsPerLine)~=0
     fprintf(fid,'\n');
 end
 fclose(fid);
+end
+
+%% ---------------------------------------------------------------------
+%  Build a single-line string describing which parameters were used
+%% ---------------------------------------------------------------------
+function paramLine = buildParameterLine(cfg)
+% Decide which parameter set to record, based on waveTypeVal and spectrumVal.
+% Return a single string, e.g.:
+%   "Used parameters: Time Step (s)=0.1, Number of Samples=40000, Ramp Duration (sec)=0, Wave Height, H=9.96, ..."
+%
+% Regular wave => waveTypeVal==1
+% Irregular => waveTypeVal==2 with a specific spectrumVal
+
+if cfg.waveTypeVal == 1
+    % Regular wave
+    paramPairs = {
+        'Time Step (s)',                cfg.tStep
+        'Number of Samples',            cfg.nSamples
+        'Ramp Duration (sec)',          cfg.tRamp
+        'Wave Height, H',              cfg.H
+        'Wave Period, T',              cfg.T
+        'Phase, beta',                 cfg.beta
+        };
+else
+    % Irregular wave
+    % Determine which spectral model was chosen
+    switch cfg.spectrumVal
+        case 1 % 'JONSWAP 2-param'
+            paramPairs = {
+                'Time Step (s)',                cfg.tStep
+                'Number of Samples',            cfg.nSamples
+                'Ramp Duration (sec)',          cfg.tRamp
+                'Random Seed (for irregular)',  cfg.rSeed
+                'Significant wave height, H_s', cfg.Hs
+                'Peak period, T_p',            cfg.Tpeak
+                };
+        case 2 % 'JONSWAP 3-param'
+            paramPairs = {
+                'Time Step (s)',                cfg.tStep
+                'Number of Samples',            cfg.nSamples
+                'Ramp Duration (sec)',          cfg.tRamp
+                'Random Seed (for irregular)',  cfg.rSeed
+                'Significant wave height, H_s', cfg.Hs
+                'Peak period, T_p',            cfg.Tpeak
+                'Peakedness parameter, γ',     cfg.gamma
+                };
+        case 3 % 'JONSWAP 6-param'
+            paramPairs = {
+                'Time Step (s)',                cfg.tStep
+                'Number of Samples',            cfg.nSamples
+                'Ramp Duration (sec)',          cfg.tRamp
+                'Random Seed (for irregular)',  cfg.rSeed
+                'ω_p',                          cfg.omegaP
+                'α (alpha)',                    cfg.alpha
+                'β (betaVal)',                  cfg.betaVal
+                'γ (gamma)',                    cfg.gamma
+                'σ_a',                          cfg.sigA
+                'σ_b',                          cfg.sigB
+                };
+        case 4 % 'Torsethaugen (testing)'
+            paramPairs = {
+                'Time Step (s)',                cfg.tStep
+                'Number of Samples',            cfg.nSamples
+                'Ramp Duration (sec)',          cfg.tRamp
+                'Random Seed (for irregular)',  cfg.rSeed
+                'Significant wave height, H_s', cfg.Hs
+                'Peak period, T_p',            cfg.Tpeak
+                };
+        case 5 % 'Ochi-Hubble (testing)'
+            paramPairs = {
+                'Time Step (s)',                cfg.tStep
+                'Number of Samples',            cfg.nSamples
+                'Ramp Duration (sec)',          cfg.tRamp
+                'Random Seed (for irregular)',  cfg.rSeed
+                'Significant wave height, H_s', cfg.Hs
+                };
+        case 6 % 'PM (1-param)'
+            paramPairs = {
+                'Time Step (s)',                cfg.tStep
+                'Number of Samples',            cfg.nSamples
+                'Ramp Duration (sec)',          cfg.tRamp
+                'Random Seed (for irregular)',  cfg.rSeed
+                'Significant wave height, H_s', cfg.Hs
+                };
+        case 7 % 'PM (2-param, Tavg)'
+            paramPairs = {
+                'Time Step (s)',                cfg.tStep
+                'Number of Samples',            cfg.nSamples
+                'Ramp Duration (sec)',          cfg.tRamp
+                'Random Seed (for irregular)',  cfg.rSeed
+                'Significant wave height, H_s', cfg.Hs
+                'Average wave period, T_{avg}', cfg.Tavg
+                };
+        case 8 % 'PM (2-param, Tzc)'
+            paramPairs = {
+                'Time Step (s)',                cfg.tStep
+                'Number of Samples',            cfg.nSamples
+                'Ramp Duration (sec)',          cfg.tRamp
+                'Random Seed (for irregular)',  cfg.rSeed
+                'Significant wave height, H_s', cfg.Hs
+                'Zero-crossing wave period, T_z', cfg.Tzc
+                };
+        otherwise
+            % fallback
+            paramPairs = {
+                'Time Step (s)',     cfg.tStep
+                'Number of Samples', cfg.nSamples
+                'Ramp Duration',     cfg.tRamp
+                'Unknown ModelVal',  cfg.spectrumVal
+                };
+    end
+end
+
+% Build the final string: "Used parameters: name1=val1, name2=val2, ..."
+paramStrings = cell(1, size(paramPairs,1));
+for k = 1:size(paramPairs,1)
+    name_k = paramPairs{k,1};
+    val_k  = paramPairs{k,2};
+    % Choose a suitable format, e.g. 4 decimals for floats
+    if abs(val_k - round(val_k)) < 1e-12
+        % integer-like
+        paramStrings{k} = sprintf('%s=%d', name_k, round(val_k));
+    else
+        paramStrings{k} = sprintf('%s=%.4f', name_k, val_k);
+    end
+end
+
+paramLine = ['Used parameters: ' strjoin(paramStrings, ', ')];
 end
